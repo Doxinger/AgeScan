@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Возраст по фото и уникальность факторов</title>
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- jQuery -->
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" defer></script>
+
+  <!-- TensorFlow.js + face-api.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
+
+  <!-- Chart.js для графиков -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+
+  <!-- Color Thief для палитры -->
+  <script src="https://cdn.jsdelivr.net/npm/colorthief@2.4.0/dist/color-thief.umd.js" defer></script>
+
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header>
+    <h1>Определение возраста по фото лица</h1>
+    <p class="sub">И оценка “уникальности” пропорций, без загрузки на сервер.</p>
+  </header>
+
+  <section class="privacy">
+    <ul>
+      <li><strong>Конфиденциальность:</strong> фото обрабатывается только в вашем браузере. Никуда не отправляется и не сохраняется.</li>
+      <li><strong>Модели:</strong> по умолчанию загружаются из интернета (только файлы моделей). Для 100% оффлайн — скачайте модели в <code>./models</code> и включите переключатель.</li>
+    </ul>
+    <label class="toggle">
+      <input type="checkbox" id="useLocalModels" />
+      Использовать локальные модели (папка ./models рядом со страницей)
+    </label>
+    <div id="modelStatus" class="status">Модели: не загружены</div>
+  </section>
+
+  <section class="uploader">
+    <div id="dropzone" class="dropzone">
+      <input type="file" id="fileInput" accept="image/*" />
+      <p>Перетащите фото сюда или нажмите для выбора</p>
+      <small>Поддерживаются: JPG, PNG, HEIC/HEIF (в браузерах с поддержкой)</small>
+    </div>
+    <div class="controls">
+      <button id="analyzeBtn" disabled>Анализировать</button>
+      <button id="clearBtn" disabled>Очистить</button>
+    </div>
+  </section>
+
+  <section class="preview-results">
+    <div class="preview">
+      <div class="canvas-wrap">
+        <img id="previewImg" alt="" />
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="palette" id="palette"></div>
+    </div>
+
+    <div class="results">
+      <div class="card">
+        <h2>Возраст и пол (оценка)</h2>
+        <div id="ageGender">
+          <div class="row"><span>Возраст:</span> <strong id="ageVal">—</strong></div>
+          <div class="row"><span>Пол:</span> <strong id="genderVal">—</strong> <span id="genderConf" class="muted"></span></div>
+        </div>
+        <p class="hint">Это приблизительная оценка модели на основе лица на фото.</p>
+      </div>
+
+      <div class="card">
+        <h2>Факторы и “уникальность”</h2>
+        <ul id="metricsList" class="metrics"></ul>
+        <canvas id="radarChart" height="220"></canvas>
+        <p class="hint">
+          “Уникальность” — эвристическая шкала 0–100 относительно базовой линии пропорций.
+          Не биометрическая идентификация и не медицинская оценка.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>обработка в браузере. Фото не передается и не сохраняется.</p>
+  </footer>
+</body>
+</html>
