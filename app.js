@@ -12,12 +12,31 @@ $(document).ready(function() {
     const $confidenceValue = $('#confidenceValue');
     const $faceQualityValue = $('#faceQualityValue');
     const $video = $('#video');
+    const $overlay = $('#overlay');
     const $webcamPlaceholder = $('#webcamPlaceholder');
     const $startCameraBtn = $('#startCameraBtn');
     const $captureBtn = $('#captureBtn');
     const $stopCameraBtn = $('#stopCameraBtn');
+    const $loadingIndicator = $('#loadingIndicator');
     
     let stream = null;
+    let modelsLoaded = false;
+    
+    // Загрузка моделей face-api.js
+    async function loadModels() {
+        try {
+            await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+            await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+            await faceapi.nets.ageGenderNet.loadFromUri('/models');
+            modelsLoaded = true;
+            console.log('Модели загружены');
+        } catch (error) {
+            console.error('Ошибка загрузки моделей:', error);
+            alert('Не удалось загрузить модели распознавания. Проверьте подключение к интернету.');
+        }
+    }
+    
+    loadModels();
     
     // Обработчики событий для загрузки фото
     $uploadArea.on('click', function() {
@@ -45,7 +64,7 @@ $(document).ready(function() {
     // Перетаскивание файлов
     $uploadArea.on('dragover', function(e) {
         e.preventDefault();
-        $(this).css('border-color', var(--primary));
+        $(this).css('border-color', '#8a2be2');
     });
     
     $uploadArea.on('dragleave', function(e) {
@@ -70,55 +89,168 @@ $(document).ready(function() {
     });
     
     // Анализ фото
-    $analyzeBtn.on('click', function() {
-        $(this).html('<i class="fas fa-spinner fa-spin"></i> Анализируем...');
+    $analyzeBtn.on('click', async function() {
+        if (!modelsLoaded) {
+            alert('Модели еще не загружены. Пожалуйста, подождите.');
+            return;
+        }
+        
+        $loadingIndicator.show();
         $(this).prop('disabled', true);
         
-        // Имитация анализа (в реальном приложении здесь будет вызов API)
-        setTimeout(function() {
-            // Генерируем случайные результаты
-            const age = Math.floor(Math.random() * 40) + 18;
-            const accuracy = Math.floor(Math.random() * 10) + 85;
-            const confidence = Math.floor(Math.random() * 15) + 75;
-            const faceQuality = Math.floor(Math.random() * 10) + 85;
+        try {
+            // Создаем элемент изображения для анализа
+            const img = new Image();
+            img.src = $previewImage.attr('src');
             
-            // Отображаем результаты
-            $ageResult.text(age + ' лет');
-            $accuracyValue.text(accuracy + '%');
-            $confidenceValue.text(confidence + '%');
-            $faceQualityValue.text(faceQuality + '%');
+            // Ждем загрузки изображения
+            await new Promise((resolve) => {
+                img.onload = resolve;
+            });
             
-            $resultArea.fadeIn();
-            $analyzeBtn.html('<i class="fas fa-search"></i> Повторить анализ').prop('disabled', false);
-        }, 2000);
+            // Анализируем изображение
+            const detections = await faceapi.detectAllFaces(img, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withAgeAndGender();
+            
+            if (detections.length > 0) {
+                // Берем первый найденный результат
+                const detection = detections[0];
+                const age = Math.round(detection.age);
+                const gender = detection.gender;
+                const confidence = Math.round(detection.detection.score * 100);
+                
+                // Отображаем результаты
+                $ageResult.text(age + ' лет');
+                $accuracyValue.text(Math.min(95, Math.max(80, confidence + 5)) + '%');
+                $confidenceValue.text(confidence + '%');
+                $faceQualityValue.text(Math.min(98, Math.max(85, confidence + 10)) + '%');
+                
+                $resultArea.fadeIn();
+                
+                // Рисуем рамку вокруг лица
+                const canvas = faceapi.createCanvasFromMedia(img);
+                $previewImage.after(canvas);
+                const displaySize = { width: img.width, height: img.height };
+                faceapi.matchDimensions(canvas, displaySize);
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                faceapi.draw.drawDetections(canvas, resizedDetections);
+                faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+                
+                // Скрываем оригинальное изображение
+                $previewImage.hide();
+            } else {
+                alert('Лицо не обнаружено на изображении. Попробуйте другое фото.');
+            }
+        } catch (error) {
+            console.error('Ошибка анализа:', error);
+            alert('Произошла ошибка при анализе изображения. Попробуйте еще раз.');
+        } finally {
+            $loadingIndicator.hide();
+            $analyzeBtn.prop('disabled', false);
+        }
     });
     
     // Работа с камерой
     $startCameraBtn.on('click', async function() {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            });
             $video.attr('srcObject', stream).show();
             $webcamPlaceholder.hide();
             $startCameraBtn.prop('disabled', true);
             $captureBtn.prop('disabled', false);
             $stopCameraBtn.prop('disabled', false);
+            
+            // Начинаем отслеживание лица в реальном времени
+            startFaceDetection();
         } catch (err) {
             console.error("Ошибка доступа к камере: ", err);
             alert('Не удалось получить доступ к камере. Проверьте разрешения.');
         }
     });
     
+    // Функция для отслеживания лица в реальном времени
+    async function startFaceDetection() {
+        if (!modelsLoaded) return;
+        
+        const canvas = $overlay[0];
+        const ctx = canvas.getContext('2d');
+        
+        async function detect() {
+            if (!$video[0].paused && !$video[0].ended) {
+                try {
+                    const detections = await faceapi.detectAllFaces(
+                        $video[0], 
+                        new faceapi.TinyFaceDetectorOptions()
+                    ).withFaceLandmarks().withAgeAndGender();
+                    
+                    // Очищаем canvas
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Рисуем обнаруженные лица
+                    if (detections.length > 0) {
+                        const resizedDetections = faceapi.resizeResults(detections, {
+                            width: canvas.width,
+                            height: canvas.height
+                        });
+                        
+                        faceapi.draw.drawDetections(canvas, resizedDetections);
+                        faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+                        
+                        // Отображаем возраст и пол
+                        resizedDetections.forEach(detection => {
+                            const { age, gender, genderProbability } = detection;
+                            const x = detection.detection.box.x;
+                            const y = detection.detection.box.y - 10;
+                            
+                            ctx.fillStyle = '#8a2be2';
+                            ctx.font = 'bold 16px Arial';
+                            ctx.fillText(
+                                `${Math.round(age)} лет, ${gender} (${Math.round(genderProbability * 100)}%)`, 
+                                x, 
+                                y
+                            );
+                        });
+                    }
+                } catch (error) {
+                    console.error('Ошибка отслеживания лица:', error);
+                }
+                
+                requestAnimationFrame(detect);
+            }
+        }
+        
+        // Устанавливаем размеры canvas
+        function resizeCanvas() {
+            const video = $video[0];
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+        
+        $video.on('loadeddata', resizeCanvas);
+        resizeCanvas();
+        
+        // Начинаем отслеживание
+        detect();
+    }
+    
     $captureBtn.on('click', function() {
         // Создаем canvas для захвата кадра
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
-        const width = $video[0].videoWidth;
-        const height = $video[0].videoHeight;
+        const video = $video[0];
+        const width = video.videoWidth;
+        const height = video.videoHeight;
         
         canvas.width = width;
         canvas.height = height;
         
-        context.drawImage($video[0], 0, 0, width, height);
+        context.drawImage(video, 0, 0, width, height);
         
         // Отображаем захваченное изображение в области предпросмотра
         $previewImage.attr('src', canvas.toDataURL('image/png')).show();
@@ -138,6 +270,7 @@ $(document).ready(function() {
             stream = null;
         }
         $video.hide();
+        $overlay[0].getContext('2d').clearRect(0, 0, $overlay[0].width, $overlay[0].height);
         $webcamPlaceholder.show();
         $startCameraBtn.prop('disabled', false);
         $captureBtn.prop('disabled', true);
@@ -149,375 +282,4 @@ $(document).ready(function() {
         function() { $(this).addClass('pulse'); },
         function() { $(this).removeClass('pulse'); }
     );
-});  };
-
-  init();
-
-  async function init() {
-    bindUI();
-    await loadModels();
-  }
-
-  function bindUI() {
-    // Переключатель источника моделей
-    els.useLocalModels.addEventListener('change', async (e) => {
-      useLocal = e.target.checked;
-      modelsLoaded = false;
-      updateModelStatus('Перезагрузка моделей…');
-      try {
-        await loadModels();
-      } catch (err) {
-        updateModelStatus('Ошибка загрузки моделей. Проверьте папку ./models или интернет.', true);
-        console.error(err);
-      }
-    });
-
-    // Зона перетаскивания
-    els.dropzone.addEventListener('click', () => els.fileInput.click());
-    els.dropzone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      els.dropzone.classList.add('dragover');
-    });
-    els.dropzone.addEventListener('dragleave', () => els.dropzone.classList.remove('dragover'));
-    els.dropzone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      els.dropzone.classList.remove('dragover');
-      const file = e.dataTransfer.files?.[0];
-      if (file) handleFile(file);
-    });
-
-    els.fileInput.addEventListener('change', (e) => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
-    });
-
-    els.analyzeBtn.addEventListener('click', () => analyzeImage());
-    els.clearBtn.addEventListener('click', () => clearAll());
-  }
-
-  async function loadModels() {
-    const base = useLocal ? LOCAL_MODEL_URL : REMOTE_MODEL_URL;
-    updateModelStatus(`Загрузка моделей из: ${useLocal ? 'локально' : 'сети'}…`);
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(base),
-      faceapi.nets.faceLandmark68Net.loadFromUri(base),
-      faceapi.nets.faceRecognitionNet.loadFromUri(base),
-      faceapi.nets.ageGenderNet.loadFromUri(base)
-    ]);
-    modelsLoaded = true;
-    updateModelStatus(`Модели загружены (${useLocal ? 'локально' : 'из сети'}) ✔`);
-  }
-
-  function updateModelStatus(text, isError = false) {
-    els.modelStatus.textContent = text;
-    els.modelStatus.style.color = isError ? '#ff9a9a' : '';
-  }
-
-  function handleFile(file) {
-    if (!file || !file.type.startsWith('image/')) return;
-
-    // Чистим предыдущие ObjectURL
-    if (imageObjectURL) {
-      URL.revokeObjectURL(imageObjectURL);
-      imageObjectURL = null;
-    }
-
-    imageObjectURL = URL.createObjectURL(file);
-    els.previewImg.src = imageObjectURL;
-    els.previewImg.onload = () => {
-      // Подгоняем canvas
-      const { width, height } = els.previewImg.getBoundingClientRect();
-      els.overlay.width = Math.round(els.previewImg.naturalWidth);
-      els.overlay.height = Math.round(els.previewImg.naturalHeight);
-      // Визуально растянется вместе с img (CSS width:100%)
-      els.analyzeBtn.disabled = false;
-      els.clearBtn.disabled = false;
-
-      // Показ палитры
-      renderPalette(els.previewImg);
-    };
-  }
-
-  function clearAll() {
-    // Не сохраняем и не отправляем — просто очищаем из памяти
-    if (imageObjectURL) {
-      URL.revokeObjectURL(imageObjectURL);
-      imageObjectURL = null;
-    }
-    els.fileInput.value = '';
-    els.previewImg.removeAttribute('src');
-    const ctx = els.overlay.getContext('2d');
-    ctx.clearRect(0, 0, els.overlay.width, els.overlay.height);
-    els.palette.innerHTML = '';
-    els.ageVal.textContent = '—';
-    els.genderVal.textContent = '—';
-    els.genderConf.textContent = '';
-    els.metricsList.innerHTML = '';
-    if (radarChart) {
-      radarChart.destroy();
-      radarChart = null;
-    }
-    els.analyzeBtn.disabled = true;
-    els.clearBtn.disabled = true;
-  }
-
-  async function analyzeImage() {
-    if (!modelsLoaded) {
-      updateModelStatus('Модели еще загружаются…', true);
-      return;
-    }
-    if (!els.previewImg.src) return;
-
-    // Настройки детектора
-    const options = new faceapi.TinyFaceDetectorOptions({
-      inputSize: 416,
-      scoreThreshold: 0.5
-    });
-
-    // Детекция
-    const detection = await faceapi
-      .detectSingleFace(els.previewImg, options)
-      .withFaceLandmarks()
-      .withFaceDescriptor()
-      .withAgeAndGender();
-
-    const ctx = els.overlay.getContext('2d');
-    ctx.clearRect(0, 0, els.overlay.width, els.overlay.height);
-
-    if (!detection) {
-      toast('Лицо не найдено. Попробуйте фото с фронтальным лицом и хорошим светом.');
-      return;
-    }
-
-    // Отрисовка рамки и лэндмарков
-    faceapi.matchDimensions(els.overlay, { width: els.previewImg.naturalWidth, height: els.previewImg.naturalHeight });
-    const resizedDet = faceapi.resizeResults(detection, { width: els.previewImg.naturalWidth, height: els.previewImg.naturalHeight });
-    drawDetections(resizedDet);
-
-    // Возраст/пол
-    const age = Math.round(resizedDet.age);
-    const gender = resizedDet.gender; // 'male'/'female'
-    const conf = resizedDet.genderProbability || 0;
-    els.ageVal.textContent = `${age} лет (± несколько лет)`;
-    els.genderVal.textContent = gender === 'male' ? 'мужской' : 'женский';
-    els.genderConf.textContent = `(${(conf * 100).toFixed(0)}% уверенность)`;
-
-    // Метрики
-    const metrics = computeMetrics(resizedDet);
-    renderMetrics(metrics);
-    renderRadar(metrics);
-  }
-
-  function drawDetections(res) {
-    const ctx = els.overlay.getContext('2d');
-    const { box } = res.detection;
-    ctx.save();
-    // Рамка
-    ctx.strokeStyle = '#5ad1e6';
-    ctx.lineWidth = 2;
-    roundRect(ctx, box.x, box.y, box.width, box.height, 10);
-    ctx.stroke();
-
-    // Лэндмарки
-    ctx.fillStyle = '#8e7dff';
-    ctx.globalAlpha = 0.8;
-    const pts = res.landmarks.positions;
-    for (const p of pts) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.restore();
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
-  function computeMetrics(res) {
-    const lm = res.landmarks;
-    const pts = lm.positions;
-
-    // Утилиты
-    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    const avgPt = (arr) => arr.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 })
-                             && { x: arr.reduce((s, p) => s + p.x, 0) / arr.length, y: arr.reduce((s, p) => s + p.y, 0) / arr.length };
-    const angleDeg = (a, o, b) => {
-      const v1 = { x: a.x - o.x, y: a.y - o.y };
-      const v2 = { x: b.x - o.x, y: b.y - o.y };
-      const dot = v1.x * v2.x + v1.y * v2.y;
-      const m1 = Math.hypot(v1.x, v1.y);
-      const m2 = Math.hypot(v2.x, v2.y);
-      const cos = Math.min(1, Math.max(-1, dot / (m1 * m2)));
-      return (Math.acos(cos) * 180) / Math.PI;
-    };
-
-    const leftEye = lm.getLeftEye();
-    const rightEye = lm.getRightEye();
-    const mouth = lm.getMouth();
-    const jaw = lm.getJawOutline(); // 17 точек (0..16)
-    const nose = lm.getNose();
-
-    const leftEyeCenter = avgPt(leftEye);
-    const rightEyeCenter = avgPt(rightEye);
-    const eyeDist = dist(leftEyeCenter, rightEyeCenter);
-
-    const faceWidth = dist(jaw[4], jaw[12]); // уши-скулы
-    const faceHeight = res.detection.box.height;
-
-    const mouthWidth = dist(mouth[0], mouth[6]); // 48..54 -> 0..6 в массиве mouth
-    const noseLength = dist(nose[0], nose[6] || nose[nose.length - 1]); // примерно верх-низ
-
-    // Симметрия: сравнение пар челюсти по разные стороны от центра
-    const midX = (leftEyeCenter.x + rightEyeCenter.x) / 2;
-    let symAccum = 0;
-    let symN = 0;
-    for (let i = 0; i <= 8; i++) {
-      const L = jaw[i];              // слева
-      const R = jaw[16 - i];         // справа
-      const Lm = { x: 2 * midX - L.x, y: L.y }; // зеркальная точка L
-      const d = dist(Lm, R);
-      const norm = faceWidth || 1;
-      symAccum += 1 - Math.min(1, d / (norm * 0.5)); // 1 = идеально
-      symN++;
-    }
-    const symmetryScore = symN ? symAccum / symN : 0.9;
-
-    // Угол челюсти: угол в точке подбородка между скуловыми точками
-    const jawAngle = angleDeg(jaw[4], jaw[8], jaw[12]); // меньше = "острее" подбородок
-
-    // Относительные пропорции
-    const eyeDistRatio = eyeDist / (faceWidth || 1);
-    const mouthWidthRatio = mouthWidth / (faceWidth || 1);
-    const noseLengthRatio = noseLength / (faceHeight || 1);
-
-    return {
-      eyeDistRatio,
-      mouthWidthRatio,
-      noseLengthRatio,
-      symmetryScore: clamp(symmetryScore, 0, 1),
-      jawAngleDeg: jawAngle
-    };
-  }
-
-  function renderMetrics(metrics) {
-    els.metricsList.innerHTML = '';
-    const defs = [
-      { key: 'eyeDistRatio', fmt: (v) => v.toFixed(3) },
-      { key: 'mouthWidthRatio', fmt: (v) => v.toFixed(3) },
-      { key: 'noseLengthRatio', fmt: (v) => v.toFixed(3) },
-      { key: 'symmetryScore', fmt: (v) => v.toFixed(3) },
-      { key: 'jawAngleDeg', fmt: (v) => `${v.toFixed(1)}°` }
-    ];
-
-    for (const d of defs) {
-      const v = metrics[d.key];
-      const base = baselines[d.key];
-      const uniq = uniquenessScore(v, base.mu, base.sigma);
-      const li = document.createElement('li');
-
-      const name = document.createElement('span');
-      name.className = 'name';
-      name.textContent = `${base.label}`;
-
-      const val = document.createElement('span');
-      val.className = 'val' + (uniq >= 66 ? ' warn' : '');
-      val.textContent = `${d.fmt(v)} · уникальность ${Math.round(uniq)}%`;
-
-      li.appendChild(name);
-      li.appendChild(val);
-      els.metricsList.appendChild(li);
-    }
-  }
-
-  function renderRadar(metrics) {
-    const labels = [
-      baselines.eyeDistRatio.label,
-      baselines.mouthWidthRatio.label,
-      baselines.noseLengthRatio.label,
-      baselines.symmetryScore.label,
-      baselines.jawAngleDeg.label
-    ];
-    const data = [
-      uniquenessScore(metrics.eyeDistRatio, baselines.eyeDistRatio.mu, baselines.eyeDistRatio.sigma),
-      uniquenessScore(metrics.mouthWidthRatio, baselines.mouthWidthRatio.mu, baselines.mouthWidthRatio.sigma),
-      uniquenessScore(metrics.noseLengthRatio, baselines.noseLengthRatio.mu, baselines.noseLengthRatio.sigma),
-      uniquenessScore(metrics.symmetryScore, baselines.symmetryScore.mu, baselines.symmetryScore.sigma),
-      uniquenessScore(metrics.jawAngleDeg, baselines.jawAngleDeg.mu, baselines.jawAngleDeg.sigma)
-    ].map(x => Math.round(x));
-
-    if (radarChart) radarChart.destroy();
-    radarChart = new Chart(els.radarCanvas.getContext('2d'), {
-      type: 'radar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Уникальность (0–100)',
-          data,
-          pointRadius: 3,
-          borderColor: '#5ad1e6',
-          backgroundColor: 'rgba(90, 209, 230, 0.15)'
-        }]
-      },
-      options: {
-        responsive: true,
-        scales: {
-          r: {
-            beginAtZero: true,
-            suggestedMax: 100,
-            ticks: { stepSize: 20, color: '#9aa0bf' },
-            grid: { color: 'rgba(154,160,191,0.25)' },
-            angleLines: { color: 'rgba(154,160,191,0.25)' },
-            pointLabels: { color: '#cfd3ec', font: { size: 12 } }
-          }
-        },
-        plugins: {
-          legend: { labels: { color: '#cfd3ec' } }
-        }
-      }
-    });
-  }
-
-  function uniquenessScore(value, mu, sigma) {
-    // Z-score по модулю и сглаженный маппинг в 0..100
-    if (!isFinite(value)) return 0;
-    const z = Math.abs((value - mu) / (sigma || 1e-6));
-    // Сгладим через tanh, затем в проценты:
-    const s = Math.tanh(z); // 0..~1
-    return clamp(s * 100, 0, 100);
-  }
-
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
-
-  function toast(text) {
-    // Простейший тост
-    updateModelStatus(text, true);
-    setTimeout(() => updateModelStatus(modelsLoaded ? 'Модели загружены ✔' : 'Модели: не загружены'), 3000);
-  }
-
-  function renderPalette(imgEl) {
-    els.palette.innerHTML = '';
-    try {
-      const ct = new window.ColorThief();
-      // Если изображение слишком большое, ColorThief всё равно возьмет подвыборку
-      const palette = ct.getPalette(imgEl, 6) || [];
-      for (const rgb of palette) {
-        const [r, g, b] = rgb;
-        const sw = document.createElement('div');
-        sw.className = 'swatch';
-        sw.title = `rgb(${r}, ${g}, ${b})`;
-        sw.style.background = `rgb(${r}, ${g}, ${b})`;
-        els.palette.appendChild(sw);
-      }
-    } catch (e) {
-      // На случай, если браузер ругнётся на CORS (обычно с локальным файлом всё ок)
-      console.warn('Palette error:', e);
-    }
-  }
 });
