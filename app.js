@@ -1,40 +1,155 @@
-// Фото не передается никуда и не сохраняется. Вся обработка — в браузере.
-document.addEventListener('DOMContentLoaded', () => {
-  const $jq = window.jQuery;
-
-  const REMOTE_MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-  const LOCAL_MODEL_URL = './models';
-
-  let modelsLoaded = false;
-  let useLocal = false;
-  let radarChart = null;
-  let imageObjectURL = null;
-
-  const els = {
-    useLocalModels: document.getElementById('useLocalModels'),
-    modelStatus: document.getElementById('modelStatus'),
-    dropzone: document.getElementById('dropzone'),
-    fileInput: document.getElementById('fileInput'),
-    analyzeBtn: document.getElementById('analyzeBtn'),
-    clearBtn: document.getElementById('clearBtn'),
-    previewImg: document.getElementById('previewImg'),
-    overlay: document.getElementById('overlay'),
-    palette: document.getElementById('palette'),
-    ageVal: document.getElementById('ageVal'),
-    genderVal: document.getElementById('genderVal'),
-    genderConf: document.getElementById('genderConf'),
-    metricsList: document.getElementById('metricsList'),
-    radarCanvas: document.getElementById('radarChart')
-  };
-
-  // Эвристические базовые линии для "уникальности"
-  const baselines = {
-    eyeDistRatio: { mu: 0.46, sigma: 0.05, label: 'Глаза/ширина лица' },
-    mouthWidthRatio: { mu: 0.38, sigma: 0.06, label: 'Рот/ширина лица' },
-    noseLengthRatio: { mu: 0.35, sigma: 0.05, label: 'Нос/высота лица' },
-    symmetryScore: { mu: 0.90, sigma: 0.05, label: 'Симметрия (0–1)' },
-    jawAngleDeg: { mu: 130, sigma: 10, label: 'Угол челюсти (°)' }
-  };
+$(document).ready(function() {
+    // Элементы DOM
+    const $uploadArea = $('#uploadArea');
+    const $fileInput = $('#fileInput');
+    const $selectBtn = $('#selectBtn');
+    const $previewImage = $('#previewImage');
+    const $placeholderText = $('#placeholderText');
+    const $analyzeBtn = $('#analyzeBtn');
+    const $resultArea = $('#resultArea');
+    const $ageResult = $('#ageResult');
+    const $accuracyValue = $('#accuracyValue');
+    const $confidenceValue = $('#confidenceValue');
+    const $faceQualityValue = $('#faceQualityValue');
+    const $video = $('#video');
+    const $webcamPlaceholder = $('#webcamPlaceholder');
+    const $startCameraBtn = $('#startCameraBtn');
+    const $captureBtn = $('#captureBtn');
+    const $stopCameraBtn = $('#stopCameraBtn');
+    
+    let stream = null;
+    
+    // Обработчики событий для загрузки фото
+    $uploadArea.on('click', function() {
+        $fileInput.click();
+    });
+    
+    $selectBtn.on('click', function(e) {
+        e.stopPropagation();
+        $fileInput.click();
+    });
+    
+    $fileInput.on('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                $previewImage.attr('src', event.target.result).show();
+                $placeholderText.hide();
+                $analyzeBtn.prop('disabled', false);
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Перетаскивание файлов
+    $uploadArea.on('dragover', function(e) {
+        e.preventDefault();
+        $(this).css('border-color', var(--primary));
+    });
+    
+    $uploadArea.on('dragleave', function(e) {
+        e.preventDefault();
+        $(this).css('border-color', 'var(--gray)');
+    });
+    
+    $uploadArea.on('drop', function(e) {
+        e.preventDefault();
+        $(this).css('border-color', 'var(--gray)');
+        
+        const file = e.originalEvent.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                $previewImage.attr('src', event.target.result).show();
+                $placeholderText.hide();
+                $analyzeBtn.prop('disabled', false);
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+    
+    // Анализ фото
+    $analyzeBtn.on('click', function() {
+        $(this).html('<i class="fas fa-spinner fa-spin"></i> Анализируем...');
+        $(this).prop('disabled', true);
+        
+        // Имитация анализа (в реальном приложении здесь будет вызов API)
+        setTimeout(function() {
+            // Генерируем случайные результаты
+            const age = Math.floor(Math.random() * 40) + 18;
+            const accuracy = Math.floor(Math.random() * 10) + 85;
+            const confidence = Math.floor(Math.random() * 15) + 75;
+            const faceQuality = Math.floor(Math.random() * 10) + 85;
+            
+            // Отображаем результаты
+            $ageResult.text(age + ' лет');
+            $accuracyValue.text(accuracy + '%');
+            $confidenceValue.text(confidence + '%');
+            $faceQualityValue.text(faceQuality + '%');
+            
+            $resultArea.fadeIn();
+            $analyzeBtn.html('<i class="fas fa-search"></i> Повторить анализ').prop('disabled', false);
+        }, 2000);
+    });
+    
+    // Работа с камерой
+    $startCameraBtn.on('click', async function() {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: true });
+            $video.attr('srcObject', stream).show();
+            $webcamPlaceholder.hide();
+            $startCameraBtn.prop('disabled', true);
+            $captureBtn.prop('disabled', false);
+            $stopCameraBtn.prop('disabled', false);
+        } catch (err) {
+            console.error("Ошибка доступа к камере: ", err);
+            alert('Не удалось получить доступ к камере. Проверьте разрешения.');
+        }
+    });
+    
+    $captureBtn.on('click', function() {
+        // Создаем canvas для захвата кадра
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        const width = $video[0].videoWidth;
+        const height = $video[0].videoHeight;
+        
+        canvas.width = width;
+        canvas.height = height;
+        
+        context.drawImage($video[0], 0, 0, width, height);
+        
+        // Отображаем захваченное изображение в области предпросмотра
+        $previewImage.attr('src', canvas.toDataURL('image/png')).show();
+        $placeholderText.hide();
+        $analyzeBtn.prop('disabled', false);
+        
+        // Анимация захвата
+        $video.addClass('pulse');
+        setTimeout(() => {
+            $video.removeClass('pulse');
+        }, 1000);
+    });
+    
+    $stopCameraBtn.on('click', function() {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        $video.hide();
+        $webcamPlaceholder.show();
+        $startCameraBtn.prop('disabled', false);
+        $captureBtn.prop('disabled', true);
+        $stopCameraBtn.prop('disabled', true);
+    });
+    
+    // Анимация для кнопок
+    $('.btn').hover(
+        function() { $(this).addClass('pulse'); },
+        function() { $(this).removeClass('pulse'); }
+    );
+});  };
 
   init();
 
