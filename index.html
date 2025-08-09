@@ -1,89 +1,107 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Возраст по фото и уникальность факторов</title>
-  <link rel="stylesheet" href="styles.css" />
-
-  <!-- jQuery -->
-  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js" defer></script>
-
-  <!-- TensorFlow.js + face-api.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.21.0/dist/tf.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" defer></script>
-
-  <!-- Chart.js для графиков -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-
-  <!-- Color Thief для палитры -->
-  <script src="https://cdn.jsdelivr.net/npm/colorthief@2.4.0/dist/color-thief.umd.js" defer></script>
-
-  <script src="app.js" defer></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgeScan - Определение возраста по фото</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.0/css/all.min.css">
 </head>
 <body>
-  <header>
-    <h1>Определение возраста по фото лица</h1>
-    <p class="sub">И оценка “уникальности” пропорций, без загрузки на сервер.</p>
-  </header>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-user-clock"></i> AgeScan</h1>
+            <p class="subtitle">Определение возраста по фото лица с использованием искусственного интеллекта</p>
+        </header>
 
-  <section class="privacy">
-    <ul>
-      <li><strong>Конфиденциальность:</strong> фото обрабатывается только в вашем браузере. Никуда не отправляется и не сохраняется.</li>
-      <li><strong>Модели:</strong> по умолчанию загружаются из интернета (только файлы моделей). Для 100% оффлайн — скачайте модели в <code>./models</code> и включите переключатель.</li>
-    </ul>
-    <label class="toggle">
-      <input type="checkbox" id="useLocalModels" />
-      Использовать локальные модели (папка ./models рядом со страницей)
-    </label>
-    <div id="modelStatus" class="status">Модели: не загружены</div>
-  </section>
-
-  <section class="uploader">
-    <div id="dropzone" class="dropzone">
-      <input type="file" id="fileInput" accept="image/*" />
-      <p>Перетащите фото сюда или нажмите для выбора</p>
-      <small>Поддерживаются: JPG, PNG, HEIC/HEIF (в браузерах с поддержкой)</small>
-    </div>
-    <div class="controls">
-      <button id="analyzeBtn" disabled>Анализировать</button>
-      <button id="clearBtn" disabled>Очистить</button>
-    </div>
-  </section>
-
-  <section class="preview-results">
-    <div class="preview">
-      <div class="canvas-wrap">
-        <img id="previewImg" alt="" />
-        <canvas id="overlay"></canvas>
-      </div>
-      <div class="palette" id="palette"></div>
-    </div>
-
-    <div class="results">
-      <div class="card">
-        <h2>Возраст и пол (оценка)</h2>
-        <div id="ageGender">
-          <div class="row"><span>Возраст:</span> <strong id="ageVal">—</strong></div>
-          <div class="row"><span>Пол:</span> <strong id="genderVal">—</strong> <span id="genderConf" class="muted"></span></div>
+        <div class="main-content">
+            <div class="card">
+                <h2 class="card-title"><i class="fas fa-upload"></i> Загрузка фото</h2>
+                <div class="upload-area" id="uploadArea">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p class="upload-text">Перетащите фото сюда или нажмите для выбора</p>
+                    <button class="btn" id="selectBtn"><i class="fas fa-folder-open"></i> Выбрать файл</button>
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                </div>
+                
+                <div class="image-preview">
+                    <img id="previewImage" src="" alt="Предпросмотр">
+                    <p class="placeholder-text" id="placeholderText">Загрузите фото для анализа</p>
+                </div>
+                
+                <button class="btn" id="analyzeBtn" disabled><i class="fas fa-search"></i> Анализировать фото</button>
+                
+                <div class="result-area" id="resultArea" style="display: none;">
+                    <h3 class="result-title">Результат анализа</h3>
+                    <div class="age-result" id="ageResult">28 лет</div>
+                    
+                    <div class="factors">
+                        <div class="factor">
+                            <div class="factor-value" id="accuracyValue">92%</div>
+                            <div class="factor-name">Точность</div>
+                        </div>
+                        <div class="factor">
+                            <div class="factor-value" id="confidenceValue">87%</div>
+                            <div class="factor-name">Уверенность</div>
+                        </div>
+                        <div class="factor">
+                            <div class="factor-value" id="faceQualityValue">94%</div>
+                            <div class="factor-name">Качество лица</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h2 class="card-title"><i class="fas fa-video"></i> Сканирование лица</h2>
+                <div class="webcam-section">
+                    <div class="webcam-container">
+                        <video id="video" autoplay playsinline></video>
+                        <p class="placeholder-text" id="webcamPlaceholder">Камера не активна</p>
+                    </div>
+                    
+                    <button class="btn" id="startCameraBtn"><i class="fas fa-video"></i> Включить камеру</button>
+                    <button class="btn btn-outline" id="captureBtn" disabled><i class="fas fa-camera"></i> Сделать фото</button>
+                    <button class="btn btn-outline" id="stopCameraBtn" disabled><i class="fas fa-stop"></i> Остановить</button>
+                    
+                    <div class="instructions">
+                        <h3>Инструкция:</h3>
+                        <ol>
+                            <li>Нажмите "Включить камеру"</li>
+                            <li>Поверните голову в разные стороны</li>
+                            <li>Сделайте несколько снимков</li>
+                            <li>Выберите лучший для анализа</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
         </div>
-        <p class="hint">Это приблизительная оценка модели на основе лица на фото.</p>
-      </div>
-
-      <div class="card">
-        <h2>Факторы и “уникальность”</h2>
-        <ul id="metricsList" class="metrics"></ul>
-        <canvas id="radarChart" height="220"></canvas>
-        <p class="hint">
-          “Уникальность” — эвристическая шкала 0–100 относительно базовой линии пропорций.
-          Не биометрическая идентификация и не медицинская оценка.
-        </p>
-      </div>
+        
+        <div class="features">
+            <div class="feature-card">
+                <i class="fas fa-brain feature-icon"></i>
+                <h3>Искусственный интеллект</h3>
+                <p>Алгоритмы глубокого обучения обеспечивают высокую точность определения возраста</p>
+            </div>
+            <div class="feature-card">
+                <i class="fas fa-shield-alt feature-icon"></i>
+                <h3>Конфиденциальность</h3>
+                <p>Все данные обрабатываются локально, ваши фото не сохраняются</p>
+            </div>
+            <div class="feature-card">
+                <i class="fas fa-mobile-alt feature-icon"></i>
+                <h3>Адаптивный дизайн</h3>
+                <p>Сайт отлично работает на всех устройствах - от смартфонов до компьютеров</p>
+            </div>
+        </div>
+        
+        <footer>
+            <p>&copy; 2025 AgeScan. Все права защищены.</p>
+            <p>Данный инструмент предназначен для развлекательных целей</p>
+        </footer>
     </div>
-  </section>
 
-  <footer>
-    <p>обработка в браузере. Фото не передается и не сохраняется.</p>
-  </footer>
+    <script src="https://code.jquery.com/jquery-3.7.1.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
